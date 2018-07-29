@@ -1,0 +1,184 @@
+#!/bin/bash
+#
+# @(#) bcw - simple bc wrapper as readline example
+# @(#) $Id: bcw,v 1.9 2018/07/29 17:19:51 bduncan Exp bduncan $
+#
+# Created:  bduncan@proofpoint.com, Sat Mar  4 09:58:38 EST 2017
+#
+# Description:
+#   - simple wrapper demonstrating bash readline capability for scripts
+#   - we set up a simple read/eval loop and call bc to evaluate expressions
+#   - added factor and other commands for fun..
+#
+#####################################################################################
+#
+# We force TMPDIR on Macs as the standard one is sooo ugly..
+case `uname -s` in
+  Darwin)  TMPDIR=/tmp                ;;    # force it on mac osx
+  *)       TMPDIR="${TMPDIR:-/tmp}"   ;;
+esac
+export TMPDIR
+
+PROGNAME=$(basename "$0")                       ; export PROGNAME
+PROMPT="[$PROGNAME]->"                          ; export PROMPT  # interactive prompt
+prompt="$PROMPT"                                ; export prompt
+verbose=${verbose:-false}                       ; export verbose
+trace=false                                     ; export trace
+debug=${debug:-false}                           ; export debug
+tabcomplete="${TMPDIR}/${PROGNAME}.tab.$$"      ; export tabcomplete
+historyfile="$HOME/.${PROGNAME}_history"        ; export historyfile
+obase=10                                        ; export obase
+ibase=10                                        ; export ibase
+scale=0                                         ; export scale
+last=0                                          ; export last
+keywords="debug verbose trace clear help history expr ibase obase scale last on off true false factor"
+
+mkdir -p "$tabcomplete" || { echo "Cannot make $tabcomplete" ; exit 1; }
+
+# clean up after ourselves and save history
+cleanup () {
+  [ -d "$tabcomplete"  ] && rm -rf "$tabcomplete"  > /dev/null 2>&1
+  [ -f "$historyfile" ]  && history -w "$historyfile"
+    echo "Bye!"
+}
+
+trap 'cleanup' 0
+#####################################################################################
+
+dohelp () {
+cat <<- EoHelp |
+Help:
+  expr expression     # feed expression through bc
+  factor expression   # factor the expression
+  history             # list the history
+  history clear       # clear history
+  sh                  # head out to the shell (exit or ^D to return)
+  sh command          # run command outside of $PROGNAME
+  debug   [on|off]    # examine or change debug
+  trace   [on|off]    # examine or change trace
+  verbose [on|off]    # examine or change verbose
+  clear               # clear clutter
+EoHelp
+  (
+    [ -n "$2" ] &&
+      grep "$2" ||
+      cat
+  )
+}
+
+
+docommand () {
+  # $1=command rest are args
+
+  $debug && echo "docommand [$*]"
+
+  if [ -n "$1" -a -n "$2" ] ; then
+    cmd=$1
+    case $cmd in
+          sh)      eval echo "$*" | sed 's/^sh *//' | sh   ;;  # this is a debug feature..
+          bash)    eval echo "$*" | sed 's/^bash *//' | sh ;;  # this is a debug feature..
+          echo)    eval echo "$*" | sed 's/^echo *//'      ;;  # this is a debug feature..
+          expr)    eval $(echo "$*" | sed -n 's/^expr \(.*\)$/echo "obase=$obase;ibase=$ibase;scale=$scale;\1" |bc/p') ;;
+          factor)  eval $(echo "$*" | sed -n 's/^factor \(.*\)$/echo "ibase=$ibase;\1" |bc|factor/p') ;;
+          ibase)   eval ibase=$2 ;;
+          obase)   eval obase=$2 ;;
+          scale)   eval scale=$2 ;;
+          help)    dohelp $*     ;;
+          exit)    eval exit $2 ;;
+          history) case $2 in
+                     clea[rn])  history -c                          ;;
+                     *)         echo "invalid command: $cmd $2"     ;;
+                   esac
+                   ;;
+
+          debug) {
+              case $2 in
+                1|on|true)    debug=true         ;;
+                0|off|false)  debug=false        ;;
+                *) echo "do not understand:  $2" ;
+                   echo 'usage:  debug [on|off]' ;;
+              esac
+            }
+            ;;
+
+          trace) {
+              case $2 in
+                1|on|true)    trace=true         ;;
+                0|off|false)  trace=false        ;;
+                *) echo "do not understand:  $2" ;
+                   echo 'usage:  trace [on|off]' ;;
+              esac
+            }
+            ;;
+
+          verbose) {
+              case $2 in
+                1|on|true)    verbose=true         ;;
+                0|off|false)  verbose=false        ;;
+                *) echo "do not understand:  $2"   ;
+                   echo 'usage:  verbose [on|off]' ;;
+              esac
+            }
+            ;;
+          \#*)       return 0 ;;
+          *)         echo "do not understand command:  $1" ;;
+    esac
+
+    shift $#       # shift all args out
+
+  else             # else command with no args
+    case $1 in
+      [a-zA-Z_][a-zA-Z0-9_]*=[a-zA-Z0-9_]*)  eval "$*" ;;
+      help)      dohelp $* ;;
+      clear)     [ -t 0 ] && tput clear ;;
+      debug)     $debug   && echo debug is on || echo debug is off ;;
+      trace)     $trace   && echo trace is on || echo trace is off ;;
+      verbose)   $verbose && echo verbose is on || echo verbose is off ;;
+      ibase)     echo $ibase  ;;
+      obase)     echo $obase  ;;
+      scale)     echo $scale  ;;
+      sh|bash)   bash         ;;
+      history)   history      ;;
+      quit)      exit 0 ;;
+      exit)      exit 0 ;;
+      \#*)       return 0 ;;
+      *)         echo "do not understand operation:  $1" ;;
+    esac
+  fi
+  $trace   && set -x || set +x
+}
+
+
+#####################################################################################
+[ -r  "$historyfile" ] && history -r "$historyfile"
+touch "$historyfile"    # make sure that we can save it when done
+
+cd ${tabcomplete} > /dev/null && {
+  touch $keywords
+  cd - > /dev/null
+}
+
+realpwd="$PWD"
+
+while : ; do
+  cd "$tabcomplete" > /dev/null    # get ready for tab complete
+  $debug && prompt="[$PROGNAME debug]->" || prompt="$PROMPT"
+  if read -e -p "$prompt" command args; then
+    if [ -n "$command" ] ; then
+      history -s $command "$args"
+      cd "$realpwd" > /dev/null    # restore the real pwd where we are
+      if docommand $command $args ; then
+        : continue
+      else
+        echo "usage:  command args"
+      fi
+    else
+      : continue
+    fi
+  else
+    break
+  fi
+# wait # for any subprocesses like xterms
+done
+
+
