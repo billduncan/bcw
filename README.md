@@ -2,6 +2,7 @@
   bduncan@beachnet.org, Sun Jul 29 16:21:07 EDT 2018
 
 ## Description
+- read about it here:  https://billduncan.org/interactive-bash-scripts/
 - very simple example of a read/eval loop in bash with
 - persistent history editing and an added bonus, factor with expressions
 
